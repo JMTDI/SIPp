@@ -54,8 +54,8 @@ def _run(cmd: list, cwd: str = None, check: bool = True) -> int:
 
 def install_deps():
     _print("\n[1/4] Installing build dependencies via apt-get...")
-    _run(["apt-get", "update", "-y"], check=False)
-    _run(["apt-get", "install", "-y"] + BUILD_DEPS)
+    _run(["sudo", "apt-get", "update", "-y"], check=False)
+    _run(["sudo", "apt-get", "install", "-y"] + BUILD_DEPS)
 
 def clone_sipp():
     _print("\n[2/4] Cloning SIPp source from GitHub...")
@@ -80,7 +80,7 @@ def build_sipp():
     cpu_count = str(os.cpu_count() or 2)
     _run(["make", f"-j{cpu_count}"], cwd=build_dir)
     _print("\n  Installing binary to /usr/local/bin/sipp ...")
-    _run(["make", "install"], cwd=build_dir)
+    _run(["sudo", "make", "install"], cwd=build_dir)
 
 def ensure_sipp():
     """
@@ -191,116 +191,134 @@ header h1{font-size:1.45rem;font-weight:700;color:#38bdf8;letter-spacing:.5px}
 .sipp-ver{font-size:.78rem;background:#0ea5e940;color:#7dd3fc;padding:3px 10px;
           border-radius:20px;border:1px solid #0ea5e960}
 .tabs{display:flex;gap:0;border-bottom:2px solid #334155;background:#1e293b;padding:0 28px}
-.tab{padding:12px 22px;cursor:pointer;font-size:.88rem;color:#94a3b8;
-     border-bottom:2px solid transparent;margin-bottom:-2px;transition:.15s;user-select:none}
-.tab.active{color:#38bdf8;border-bottom-color:#38bdf8;font-weight:600}
+.tab{padding:12px 24px;cursor:pointer;font-size:.9rem;color:#94a3b8;border-bottom:3px solid transparent;transition:.2s}
+.tab.active,.tab:hover{color:#38bdf8;border-bottom-color:#38bdf8}
 .tab-content{display:none}.tab-content.active{display:block}
-.container{max-width:1100px;margin:26px auto;padding:0 16px}
-.card{background:#1e293b;border-radius:12px;padding:24px;margin-bottom:22px;border:1px solid #334155}
-.card h2{font-size:1.05rem;color:#7dd3fc;margin-bottom:16px;
-         border-bottom:1px solid #334155;padding-bottom:8px}
-.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px}
-label{display:block;font-size:.82rem;color:#94a3b8;margin-bottom:4px}
-input,select,textarea{width:100%;padding:8px 12px;border-radius:8px;border:1px solid #475569;
-  background:#0f172a;color:#e2e8f0;font-size:.9rem;outline:none;transition:border-color .2s}
+.container{max-width:900px;margin:32px auto;padding:0 20px}
+.card{background:#1e293b;border-radius:12px;padding:28px;margin-bottom:24px;border:1px solid #334155}
+.card h2{font-size:1.1rem;color:#38bdf8;margin-bottom:18px;font-weight:600}
+.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media(max-width:600px){.form-grid{grid-template-columns:1fr}}
+label{display:block;font-size:.78rem;text-transform:uppercase;letter-spacing:1px;
+      color:#64748b;margin-bottom:4px}
+input,select,textarea{width:100%;background:#0f172a;border:1px solid #334155;
+  color:#e2e8f0;border-radius:7px;padding:9px 12px;font-size:.92rem;outline:none;
+  transition:border .2s}
 input:focus,select:focus,textarea:focus{border-color:#38bdf8}
 textarea{resize:vertical;min-height:80px;font-family:monospace;font-size:.82rem}
-.cmd-preview{background:#0f172a;border:1px solid #334155;border-radius:8px;padding:12px;
-  font-family:monospace;font-size:.82rem;color:#a3e635;word-break:break-all;
-  margin-top:10px;min-height:38px;line-height:1.6}
-.btn{padding:10px 22px;border-radius:8px;border:none;cursor:pointer;
-     font-size:.88rem;font-weight:600;transition:all .15s}
-.btn-primary{background:#0ea5e9;color:#fff}.btn-primary:hover{background:#0284c7}
-.btn-danger{background:#ef4444;color:#fff}.btn-danger:hover{background:#dc2626}
-.btn-sm{padding:5px 13px;font-size:.8rem}
-.btn-row{display:flex;gap:10px;margin-top:16px;flex-wrap:wrap;align-items:center}
-table{width:100%;border-collapse:collapse;font-size:.87rem}
-th{background:#0f172a;color:#7dd3fc;padding:10px 12px;text-align:left}
-td{padding:9px 12px;border-bottom:1px solid #1e293b55;vertical-align:middle}
-tr:hover td{background:#1e293b99}
-.badge{display:inline-block;padding:2px 10px;border-radius:20px;font-size:.74rem;font-weight:600}
-.badge-running{background:#166534;color:#86efac}
-.badge-done   {background:#1e3a5f;color:#93c5fd}
-.badge-error  {background:#7f1d1d;color:#fca5a5}
-.log-box{background:#020617;border:1px solid #334155;border-radius:8px;padding:14px;
-  font-family:monospace;font-size:.78rem;color:#86efac;max-height:440px;
-  overflow-y:auto;white-space:pre-wrap;word-break:break-all;margin-top:10px;line-height:1.5}
-#logModal{display:none;position:fixed;top:0;left:0;width:100%;height:100%;
-  background:#0009;z-index:100;justify-content:center;align-items:center}
+.btn{padding:10px 22px;border:none;border-radius:8px;cursor:pointer;font-size:.9rem;
+     font-weight:600;transition:.2s}
+.btn-primary{background:#0ea5e9;color:#fff}.btn-primary:hover{background:#38bdf8}
+.btn-danger{background:#ef4444;color:#fff}.btn-danger:hover{background:#f87171}
+.btn-sm{padding:6px 14px;font-size:.8rem}
+.btn-row{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px}
+.cmd-preview{background:#0f172a;border:1px solid #334155;border-radius:7px;
+             padding:10px 14px;font-family:monospace;font-size:.8rem;color:#7dd3fc;
+             word-break:break-all;margin-top:6px}
+table{width:100%;border-collapse:collapse;font-size:.88rem}
+th{text-align:left;padding:10px 12px;color:#64748b;border-bottom:1px solid #334155;
+   font-size:.75rem;text-transform:uppercase;letter-spacing:.8px}
+td{padding:10px 12px;border-bottom:1px solid #1e293b;vertical-align:middle}
+tr:hover td{background:#0f172a30}
+.badge{display:inline-block;padding:3px 10px;border-radius:20px;font-size:.75rem;font-weight:600}
+.badge-running{background:#0ea5e920;color:#38bdf8;border:1px solid #0ea5e940}
+.badge-done{background:#10b98120;color:#34d399;border:1px solid #10b98140}
+.badge-error{background:#ef444420;color:#f87171;border:1px solid #ef444440}
+#logModal{display:none;position:fixed;inset:0;background:#000a;z-index:100;
+          align-items:center;justify-content:center}
 #logModal.open{display:flex}
-.modal-box{background:#1e293b;border-radius:12px;padding:24px;width:92%;max-width:840px;
-  max-height:86vh;display:flex;flex-direction:column;gap:10px;border:1px solid #334155}
-.modal-box h3{color:#38bdf8}
-.tip{background:#0f172a;border-left:3px solid #0ea5e9;padding:10px 14px;border-radius:6px;
-     font-size:.83rem;color:#94a3b8;margin-bottom:14px;line-height:1.6}
-.tip code{color:#a3e635;background:#1e293b;padding:1px 5px;border-radius:4px;font-size:.8rem}
+.modal-box{background:#1e293b;border-radius:12px;padding:24px;width:90%;max-width:780px;
+           border:1px solid #334155;max-height:85vh;display:flex;flex-direction:column;gap:12px}
+.log-box{background:#0f172a;border-radius:8px;padding:14px;font-family:monospace;
+         font-size:.8rem;color:#94a3b8;overflow-y:auto;flex:1;white-space:pre-wrap;
+         max-height:55vh}
 </style>
 </head>
 <body>
-
 <header>
-  <h1>📞 SIPp Web UI</h1>
-  <span class="sipp-ver" id="sippVer">checking...</span>
+  <h1>📡 SIPp Web UI</h1>
+  <span class="sipp-ver" id="sippVer">loading…</span>
 </header>
 
 <div class="tabs">
-  <div class="tab active"  onclick="switchTab('launch',this)">🚀 Launch Test</div>
-  <div class="tab"         onclick="switchTab('jobs',  this)">📋 Jobs</div>
+  <div class="tab active" onclick="switchTab('launch',this)">🚀 Launch</div>
+  <div class="tab" onclick="switchTab('jobs',this)">📋 Jobs</div>
 </div>
 
 <!-- ══════════════ LAUNCH TAB ══════════════ -->
 <div id="tab-launch" class="tab-content active">
 <div class="container">
   <div class="card">
-    <h2>🚀 Configure &amp; Launch SIPp Test</h2>
-
-    <div class="tip">
-      SIPp was built from source on server startup. Use the fields below to configure your test.
-      The full command is previewed before you launch.
+    <h2>🎯 Target</h2>
+    <div class="form-grid">
+      <div>
+        <label>Remote Host *</label>
+        <input id="remoteHost" placeholder="192.168.1.100" oninput="updatePreview()"/>
+      </div>
+      <div>
+        <label>Remote Port</label>
+        <input id="remotePort" value="5060" oninput="updatePreview()"/>
+      </div>
     </div>
+  </div>
 
-    <div class="grid">
-      <div><label>Remote Host / IP *</label>
-           <input id="remoteHost" placeholder="192.168.1.100"/></div>
-      <div><label>Remote Port</label>
-           <input id="remotePort" value="5060" placeholder="5060"/></div>
-      <div><label>SIP Username&nbsp;<code style="font-size:.75rem;color:#a3e635">-s</code></label>
-           <input id="sipUser" placeholder="1001"/></div>
-      <div><label>Auth Password&nbsp;<code style="font-size:.75rem;color:#a3e635">-ap</code></label>
-           <input id="sipPass" type="password" placeholder="secret"/></div>
-      <div><label>Local IP&nbsp;<code style="font-size:.75rem;color:#a3e635">-i</code></label>
-           <input id="localIp" placeholder="auto-detect"/></div>
-      <div><label>Local SIP Port&nbsp;<code style="font-size:.75rem;color:#a3e635">-p</code></label>
-           <input id="localPort" placeholder="5060"/></div>
-      <div><label>Calls / sec&nbsp;<code style="font-size:.75rem;color:#a3e635">-r</code></label>
-           <input id="callRate" type="number" value="1" min="1"/></div>
-      <div><label>Max Calls&nbsp;<code style="font-size:.75rem;color:#a3e635">-m</code></label>
-           <input id="maxCalls" type="number" value="10" min="1"/></div>
-      <div><label>Max Concurrent&nbsp;<code style="font-size:.75rem;color:#a3e635">-l</code></label>
-           <input id="concCalls" type="number" value="10" min="1"/></div>
-      <div><label>Transport&nbsp;<code style="font-size:.75rem;color:#a3e635">-t</code></label>
-           <select id="transport">
-             <option value="u">UDP</option>
-             <option value="t">TCP</option>
-             <option value="l">TLS</option>
-             <option value="w">WebSocket</option>
-             <option value="wss">Secure WebSocket</option>
-           </select></div>
-      <div><label>Built-in Scenario&nbsp;<code style="font-size:.75rem;color:#a3e635">-sf</code></label>
-           <select id="scenarioSelect">
-             <option value="">-- none / use XML below --</option>
-             <option value="uac">uac  (UAC call flow)</option>
-             <option value="uas">uas  (UAS auto-answer)</option>
-             <option value="regexp">regexp</option>
-           </select></div>
-      <div><label>Extra Flags</label>
-           <input id="extraArgs" placeholder="-trace_msg -aa -recv_timeout 5000"/></div>
+  <div class="card">
+    <h2>👤 SIP Credentials</h2>
+    <div class="form-grid">
+      <div>
+        <label>SIP User (-s)</label>
+        <input id="sipUser" placeholder="1000" oninput="updatePreview()"/>
+      </div>
+      <div>
+        <label>SIP Password (-ap)</label>
+        <input id="sipPass" placeholder="secret" type="password" oninput="updatePreview()"/>
+      </div>
+      <div>
+        <label>Local IP (-i)</label>
+        <input id="localIp" placeholder="auto" oninput="updatePreview()"/>
+      </div>
+      <div>
+        <label>Local Port (-p)</label>
+        <input id="localPort" placeholder="5080" oninput="updatePreview()"/>
+      </div>
     </div>
+  </div>
 
-    <div style="margin-top:16px">
-      <label>Custom Scenario XML
-        <span style="color:#64748b;font-size:.78rem">(optional — overrides built-in scenario above)</span>
-      </label>
+  <div class="card">
+    <h2>⚙️ Load Parameters</h2>
+    <div class="form-grid">
+      <div>
+        <label>Call Rate / s (-r)</label>
+        <input id="callRate" value="1" oninput="updatePreview()"/>
+      </div>
+      <div>
+        <label>Max Calls (-m)</label>
+        <input id="maxCalls" value="10" oninput="updatePreview()"/>
+      </div>
+      <div>
+        <label>Concurrent Calls (-l)</label>
+        <input id="concCalls" value="10" oninput="updatePreview()"/>
+      </div>
+      <div>
+        <label>Transport (-t)</label>
+        <select id="transport" onchange="updatePreview()">
+          <option value="u">UDP (u)</option>
+          <option value="t">TCP (t)</option>
+          <option value="l">TLS (l)</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>📄 Scenario</h2>
+    <div>
+      <label>Scenario File Path (-sf)</label>
+      <input id="scenario" placeholder="/path/to/scenario.xml  (leave blank to paste XML below)"
+             oninput="updatePreview()"/>
+    </div>
+    <div style="margin-top:14px">
+      <label>Inline Scenario XML (paste here)</label>
       <textarea id="scenarioXml" placeholder="Paste your SIPp XML scenario here..."></textarea>
     </div>
 
@@ -372,113 +390,117 @@ function switchTab(name, el) {
 
 // ── command builder ───────────────────────────────────────────────────────
 function buildCmd() {
-  const v = id => document.getElementById(id).value.trim();
+  const host = document.getElementById('remoteHost').value.trim();
+  if (!host) return 'sipp ...';
+  const port   = document.getElementById('remotePort').value.trim() || '5060';
+  const user   = document.getElementById('sipUser').value.trim();
+  const pass   = document.getElementById('sipPass').value.trim();
+  const lip    = document.getElementById('localIp').value.trim();
+  const lport  = document.getElementById('localPort').value.trim();
+  const rate   = document.getElementById('callRate').value.trim() || '1';
+  const maxc   = document.getElementById('maxCalls').value.trim() || '10';
+  const conc   = document.getElementById('concCalls').value.trim() || '10';
+  const trans  = document.getElementById('transport').value;
+  const scen   = document.getElementById('scenario').value.trim();
+  const xml    = document.getElementById('scenarioXml').value.trim();
   let cmd = 'sipp';
-  const xml=v('scenarioXml'), scen=v('scenarioSelect');
-  if (xml)       cmd += ' -sf /tmp/sipp_scenario.xml';
-  else if (scen) cmd += ' -sf '+scen;
-  if (v('sipUser'))   cmd += ' -s '  + v('sipUser');
-  if (v('sipPass'))   cmd += ' -ap ' + v('sipPass');
-  if (v('localIp'))   cmd += ' -i '  + v('localIp');
-  if (v('localPort')) cmd += ' -p '  + v('localPort');
-  cmd += ' -r '+(v('callRate')||'1');
-  cmd += ' -m '+(v('maxCalls')||'10');
-  cmd += ' -l '+(v('concCalls')||'10');
-  cmd += ' -t '+v('transport');
-  if (v('extraArgs')) cmd += ' '+v('extraArgs');
-  cmd += ' '+(v('remoteHost')||'<remote_host>')+':'+(v('remotePort')||'5060');
+  if (xml)   cmd += ' -sf /tmp/sipp_scenario.xml';
+  else if (scen) cmd += ` -sf ${scen}`;
+  if (user)  cmd += ` -s ${user}`;
+  if (pass)  cmd += ` -ap ${pass}`;
+  if (lip)   cmd += ` -i ${lip}`;
+  if (lport) cmd += ` -p ${lport}`;
+  cmd += ` -r ${rate} -m ${maxc} -l ${conc} -t ${trans}`;
+  cmd += ` ${host}:${port}`;
   return cmd;
 }
-function updatePreview(){
+function updatePreview() {
   document.getElementById('cmdPreview').textContent = buildCmd();
 }
-document.querySelectorAll('input,select,textarea')
-        .forEach(el=>el.addEventListener('input',updatePreview));
-updatePreview();
 
 // ── launch ────────────────────────────────────────────────────────────────
 function launchSipp() {
   const host = document.getElementById('remoteHost').value.trim();
-  if (!host){ alert('Remote Host / IP is required.'); return; }
+  if (!host) { alert('Remote Host is required'); return; }
   const payload = {
     remote_host:  host,
-    remote_port:  document.getElementById('remotePort').value.trim()  || '5060',
+    remote_port:  document.getElementById('remotePort').value.trim() || '5060',
     sip_user:     document.getElementById('sipUser').value.trim(),
     sip_pass:     document.getElementById('sipPass').value.trim(),
     local_ip:     document.getElementById('localIp').value.trim(),
     local_port:   document.getElementById('localPort').value.trim(),
-    call_rate:    document.getElementById('callRate').value.trim()     || '1',
-    max_calls:    document.getElementById('maxCalls').value.trim()     || '10',
-    conc_calls:   document.getElementById('concCalls').value.trim()    || '10',
+    call_rate:    document.getElementById('callRate').value.trim() || '1',
+    max_calls:    document.getElementById('maxCalls').value.trim() || '10',
+    conc_calls:   document.getElementById('concCalls').value.trim() || '10',
     transport:    document.getElementById('transport').value,
-    scenario:     document.getElementById('scenarioSelect').value,
+    scenario:     document.getElementById('scenario').value.trim(),
     scenario_xml: document.getElementById('scenarioXml').value.trim(),
-    extra_args:   document.getElementById('extraArgs').value.trim(),
   };
-  fetch('/api/launch',{  
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body:JSON.stringify(payload)
-  }).then(r=>r.json()).then(d=>{
-    if(d.error){ alert('❌ '+d.error); return; }
-    alert('✅ Job #'+d.job_id+' launched!\n\n'+d.cmd);
-    document.querySelectorAll('.tab-content').forEach(t=>t.classList.remove('active'));
-    document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
-    document.getElementById('tab-jobs').classList.add('active');
-    document.querySelectorAll('.tab')[1].classList.add('active');
-    refreshJobs();
+  fetch('/api/launch', {method:'POST', headers:{'Content-Type':'application/json'},
+                        body:JSON.stringify(payload)})
+    .then(r=>r.json()).then(d=>{
+      if (d.error) { alert('Error: '+d.error); return; }
+      alert(`✅ Job #${d.job_id} started (PID ${d.pid})`);
+      switchTab('jobs', document.querySelectorAll('.tab')[1]);
+    });
+}
+
+// ── jobs table ────────────────────────────────────────────────────────────
+function refreshJobs() {
+  fetch('/api/jobs').then(r=>r.json()).then(jobs=>{
+    const el = document.getElementById('jobsTable');
+    if (!jobs.length) {
+      el.innerHTML = '<p style="color:#64748b;font-size:.9rem">No jobs yet — launch a test first.</p>';
+      return;
+    }
+    let html = `<table><thead><tr>
+      <th>#</th><th>Command</th><th>PID</th><th>Status</th><th>Actions</th>
+    </tr></thead><tbody>`;
+    for (const j of jobs) {
+      const badge = j.status==='running'
+        ? '<span class="badge badge-running">running</span>'
+        : j.status==='done'
+        ? '<span class="badge badge-done">done</span>'
+        : '<span class="badge badge-error">error</span>';
+      const cmd = j.cmd.length>60 ? j.cmd.slice(0,60)+'…' : j.cmd;
+      html += `<tr>
+        <td>${j.job_id}</td>
+        <td style="font-family:monospace;font-size:.78rem;color:#7dd3fc">${cmd}</td>
+        <td>${j.pid||'—'}</td>
+        <td>${badge}</td>
+        <td>
+          <button class="btn btn-sm" style="background:#334155;color:#e2e8f0"
+                  onclick="showLog(${j.job_id})">📄 Log</button>
+          ${j.status==='running'
+            ? `<button class="btn btn-sm btn-danger" onclick="killJob(${j.job_id})">⛔ Kill</button>`
+            : ''}
+        </td>
+      </tr>`;
+    }
+    html += '</tbody></table>';
+    el.innerHTML = html;
   });
 }
 
-// ── jobs ──────────────────────────────────────────────────────────────────
-function refreshJobs(){
-  fetch('/api/jobs').then(r=>r.json()).then(jobs=>{
-    const el=document.getElementById('jobsTable');
-    if(!jobs.length){
-      el.innerHTML='<p style="color:#64748b;font-size:.9rem">No jobs yet.</p>';
-      return;
-    }
-    let h='<table><thead><tr><th>#</th><th>Command</th><th>Status</th><th>PID</th><th>Actions</th></tr></thead><tbody>';
-    jobs.forEach(j=>{
-      const badge = j.status==='running'
-        ? '<span class="badge badge-running">▶ Running</span>'
-        : j.status==='error'
-        ? '<span class="badge badge-error">✕ Error</span>'
-        : '<span class="badge badge-done">✓ Done</span>';
-      const kill = j.status==='running'
-        ? `<button class="btn btn-sm btn-danger" onclick="killJob(${j.job_id})">Kill</button>`
-        : '';
-      h+=`<tr>
-        <td>${j.job_id}</td>
-        <td style="font-family:monospace;font-size:.75rem;max-width:420px;word-break:break-all">${j.cmd}</td>
-        <td>${badge}</td>
-        <td>${j.pid||'-'}</td>
-        <td style="display:flex;gap:6px;flex-wrap:wrap">
-          <button class="btn btn-sm" style="background:#334155;color:#e2e8f0"
-                  onclick="showLog(${j.job_id})">📄 Logs</button>
-          ${kill}</td></tr>`;
-    });
-    el.innerHTML=h+'</tbody></table>';
-  });
+function killJob(jid) {
+  fetch('/api/kill', {method:'POST', headers:{'Content-Type':'application/json'},
+                      body:JSON.stringify({job_id:jid})})
+    .then(()=>refreshJobs());
 }
-function killJob(id){
-  fetch('/api/kill',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({job_id:id})}).then(()=>refreshJobs());
-}
-function killAll(){
-  fetch('/api/kill_all',{method:'POST'}).then(()=>refreshJobs());
+function killAll() {
+  fetch('/api/kill_all', {method:'POST'}).then(()=>refreshJobs());
 }
 
 // ── log modal ─────────────────────────────────────────────────────────────
-function showLog(id){
-  currentJobId=id;
-  document.getElementById('modalTitle').textContent='Job #'+id+' — Output';
+function showLog(jid) {
+  currentJobId = jid;
+  document.getElementById('modalTitle').textContent = `Job #${jid} Output`;
   document.getElementById('logModal').classList.add('open');
   refreshModal();
 }
-function refreshModal(){
-  if(currentJobId===null) return;
-  fetch('/api/log?job_id='+currentJobId).then(r=>r.json()).then(d=>{
+function refreshModal() {
+  if (!currentJobId) return;
+  fetch(`/api/log?job_id=${currentJobId}`).then(r=>r.json()).then(d=>{
     const el=document.getElementById('modalLog');
     el.textContent=d.output||'(no output yet)';
     el.scrollTop=el.scrollHeight;
@@ -495,6 +517,7 @@ refreshJobs();
 </script>
 </body>
 </html>"""
+
 # ─────────────────────────────────────────────────────────────────────────────
 # HTTP Handler
 # ─────────────────────────────────────────────────────────────────────────────
@@ -656,9 +679,5 @@ if __name__ == "__main__":
 
     PORT = 8000
     server = http.server.HTTPServer(("0.0.0.0", PORT), SippHandler)
-    _print(f"🌐  SIPp Web UI  →  http://0.0.0.0:{PORT}\n")
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        _print("\n🛑  Server stopped.")
-        server.server_close()
+    _print(f"🌐  SIPp Web UI  →  http://0.0.0.0:{PORT}")
+    server.serve_forever()
