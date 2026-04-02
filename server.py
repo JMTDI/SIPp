@@ -68,12 +68,12 @@ def build_sipp():
     _print("\n[3/4] Configuring with CMake...")
     build_dir = os.path.join(SIPP_SRC_DIR, "build")
     os.makedirs(build_dir, exist_ok=True)
-    _run([
-        "cmake", "..",
-        "-DUSE_SSL=ON",
-        "-DUSE_SCTP=ON",
-        "-DUSE_PCAP=ON",
-        "-DCMAKE_BUILD_TYPE=Release"],
+    _run(
+        ["cmake", "..",
+         "-DUSE_SSL=ON",
+         "-DUSE_SCTP=ON",
+         "-DUSE_PCAP=ON",
+         "-DCMAKE_BUILD_TYPE=Release"],
         cwd=build_dir,
     )
     _print("\n[4/4] Compiling SIPp (this may take a few minutes)...")
@@ -180,7 +180,8 @@ HTML_PAGE = r"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1.0"/>\n<title>SIPp Web UI</title>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>SIPp Web UI</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:'Segoe UI',sans-serif;background:#0f172a;color:#e2e8f0;min-height:100vh}
@@ -414,14 +415,13 @@ function launchSipp() {
     scenario_xml: document.getElementById('scenarioXml').value.trim(),
     extra_args:   document.getElementById('extraArgs').value.trim(),
   };
-  fetch('/api/launch',{
+  fetch('/api/launch',{  
     method:'POST',
     headers:{'Content-Type':'application/json'},
     body:JSON.stringify(payload)
   }).then(r=>r.json()).then(d=>{
     if(d.error){ alert('❌ '+d.error); return; }
     alert('✅ Job #'+d.job_id+' launched!\n\n'+d.cmd);
-    // switch to jobs tab
     document.querySelectorAll('.tab-content').forEach(t=>t.classList.remove('active'));
     document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
     document.getElementById('tab-jobs').classList.add('active');
@@ -490,12 +490,11 @@ function closeModal(){
 }
 
 // auto-refresh jobs every 3 s
-setInterval(refreshJobs,3000);
+setInterval(refreshJobs, 3000);
 refreshJobs();
 </script>
 </body>
 </html>"""
-
 # ─────────────────────────────────────────────────────────────────────────────
 # HTTP Handler
 # ─────────────────────────────────────────────────────────────────────────────
@@ -547,8 +546,12 @@ class SippHandler(http.server.BaseHTTPRequestHandler):
         elif path == "/api/jobs":
             with lock:
                 jobs = [
-                    {"job_id": jid, "cmd": j["cmd",
-                     "status": j["status"], "pid": j.get("pid")}
+                    {
+                        "job_id": jid,
+                        "cmd":    j["cmd"],
+                        "status": j["status"],
+                        "pid":    j.get("pid"),
+                    }
                     for jid, j in running_processes.items()
                 ]
             self.send_json(list(reversed(jobs)))
@@ -565,7 +568,7 @@ class SippHandler(http.server.BaseHTTPRequestHandler):
             if not job:
                 self.send_json({"error": "job not found"}, 404)
                 return
-            self.send_json({"output": "".join(job["output"])})
+            self.send_json({"output": "".join(job["output"]})}
 
         else:
             self.send_response(404)
@@ -649,10 +652,8 @@ class SippHandler(http.server.BaseHTTPRequestHandler):
 # Entry Point
 # ─────────────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    # ── 1. Build / verify SIPp BEFORE starting the HTTP server ──────────────
     ensure_sipp()
 
-    # ── 2. Start HTTP server ─────────────────────────────────────────────────
     PORT = 8000
     server = http.server.HTTPServer(("0.0.0.0", PORT), SippHandler)
     _print(f"🌐  SIPp Web UI  →  http://0.0.0.0:{PORT}\n")
@@ -660,4 +661,4 @@ if __name__ == "__main__":
         server.serve_forever()
     except KeyboardInterrupt:
         _print("\n🛑  Server stopped.")
-        server.server_close().
+        server.server_close()
