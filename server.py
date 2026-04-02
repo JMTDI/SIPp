@@ -568,7 +568,7 @@ class SippHandler(http.server.BaseHTTPRequestHandler):
             if not job:
                 self.send_json({"error": "job not found"}, 404)
                 return
-            self.send_json({"output": "".join(job["output"]})
+            self.send_json({"output": "".join(job["output"])})
 
         else:
             self.send_response(404)
