@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 SIPp Web UI — Python-only, port 8000
-SIPp is built from source automatically on first run.
+SIPp binary is downloaded automatically on first run.
 Usage: python3 server.py
 """
 
@@ -13,27 +13,28 @@ import os
 import shlex
 import shutil
 import sys
+import urllib.request
+import stat
+import tarfile
 from urllib.parse import parse_qs, urlparse
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SIPp — build from source on startup
+# SIPp — download pre-built binary on startup
 # ─────────────────────────────────────────────────────────────────────────────
-SIPP_REPO    = "https://github.com/SIPp/sipp.git"
-SIPP_SRC_DIR = "/tmp/sipp_src"
-SIPP_BIN     = "/usr/local/bin/sipp"
+SIPP_BIN_DIR = os.path.expanduser("~/.local/bin")
+SIPP_BIN     = os.path.join(SIPP_BIN_DIR, "sipp")
 
-BUILD_DEPS = [
-    "git", "cmake", "make",
-    "build-essential",
-    "libssl-dev",
-    "libpcap-dev",
-    "libxml2-dev",
-    "libsctp-dev",
-    "lksctp-tools",
-]
+# Pre-built static binary from the official SIPp GitHub releases
+# (linux x86_64 static build — no deps needed)
+SIPP_RELEASE_URL = (
+    "https://github.com/SIPp/sipp/releases/download/v3.7.2/"
+    "sipp-3.7.2-linux-amd64-static.tar.gz"
+)
+
 
 def _print(msg: str):
     print(msg, flush=True)
+
 
 def _run(cmd: list, cwd: str = None, check: bool = True) -> int:
     """Run a command, stream output to stdout, return exit code."""
@@ -52,67 +53,87 @@ def _run(cmd: list, cwd: str = None, check: bool = True) -> int:
         raise RuntimeError(f"Command failed (exit {proc.returncode}): {' '.join(cmd)}")
     return proc.returncode
 
-def install_deps():
-    _print("\n[1/4] Installing build dependencies via apt-get...")
-    _run(["sudo", "apt-get", "update", "-y"], check=False)
-    _run(["sudo", "apt-get", "install", "-y"] + BUILD_DEPS)
 
-def clone_sipp():
-    _print("\n[2/4] Cloning SIPp source from GitHub...")
-    if os.path.isdir(SIPP_SRC_DIR):
-        _print(f"  Removing old source dir: {SIPP_SRC_DIR}")
-        shutil.rmtree(SIPP_SRC_DIR)
-    _run(["git", "clone", "--depth=1", SIPP_REPO, SIPP_SRC_DIR])
+def download_sipp():
+    """Download the pre-built static SIPp binary using only Python stdlib."""
+    _print("\n" + "═" * 60)
+    _print("  SIPp not found — downloading pre-built binary...")
+    _print("═" * 60)
 
-def build_sipp():
-    _print("\n[3/4] Configuring with CMake...")
-    build_dir = os.path.join(SIPP_SRC_DIR, "build")
-    os.makedirs(build_dir, exist_ok=True)
-    _run(
-        ["cmake", "..",
-         "-DUSE_SSL=ON",
-         "-DUSE_SCTP=ON",
-         "-DUSE_PCAP=ON",
-         "-DCMAKE_BUILD_TYPE=Release"],
-        cwd=build_dir,
-    )
-    _print("\n[4/4] Compiling SIPp (this may take a few minutes)...")
-    cpu_count = str(os.cpu_count() or 2)
-    _run(["make", f"-j{cpu_count}"], cwd=build_dir)
-    _print("\n  Installing binary to /usr/local/bin/sipp ...")
-    _run(["sudo", "make", "install"], cwd=build_dir)
+    os.makedirs(SIPP_BIN_DIR, exist_ok=True)
+
+    tarball = "/tmp/sipp.tar.gz"
+    _print(f"\n[1/3] Downloading SIPp from:\n  {SIPP_RELEASE_URL}")
+
+    def _progress(block_num, block_size, total_size):
+        if total_size > 0:
+            pct = min(100, block_num * block_size * 100 // total_size)
+            sys.stdout.write(f"\r    {pct}% ")
+            sys.stdout.flush()
+
+    urllib.request.urlretrieve(SIPP_RELEASE_URL, tarball, reporthook=_progress)
+    sys.stdout.write("\n")
+
+    _print(f"\n[2/3] Extracting archive to {SIPP_BIN_DIR} ...")
+    with tarfile.open(tarball, "r:gz") as tar:
+        for member in tar.getmembers():
+            # extract only the sipp binary (ignore paths)
+            if os.path.basename(member.name) == "sipp" and member.isfile():
+                member.name = "sipp"
+                tar.extract(member, SIPP_BIN_DIR)
+                break
+        else:
+            raise RuntimeError("sipp binary not found inside the tarball")
+
+    _print(f"\n[3/3] Making {SIPP_BIN} executable ...")
+    st = os.stat(SIPP_BIN)
+    os.chmod(SIPP_BIN, st.st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+
+    # Clean up
+    os.remove(tarball)
+
+    _print(f"\n✅  SIPp downloaded → {SIPP_BIN}\n")
+    _print("═" * 60 + "\n")
+
 
 def ensure_sipp():
     """
     Called once at startup.
-    If sipp is already on PATH, skip the build entirely.
-    Otherwise, build from source.
+    If sipp is already on PATH, skip download.
+    Otherwise, download a pre-built static binary into ~/.local/bin.
     """
     if shutil.which("sipp"):
         path = shutil.which("sipp")
-        _print(f"\n✅  SIPp already installed → {path}  (skipping build)\n")
+        _print(f"\n✅  SIPp already installed → {path}  (skipping download)\n")
         return
 
-    _print("\n" + "═" * 60)
-    _print("  SIPp not found — building from source...")
-    _print("═" * 60)
+    # Also check our own download location
+    if os.path.isfile(SIPP_BIN) and os.access(SIPP_BIN, os.X_OK):
+        _print(f"\n✅  SIPp already downloaded → {SIPP_BIN}  (skipping download)\n")
+        # Ensure it's on PATH for this process
+        _prepend_bin_to_path()
+        return
 
     try:
-        install_deps()
-        clone_sipp()
-        build_sipp()
+        download_sipp()
     except Exception as e:
-        _print(f"\n❌  Build failed: {e}")
-        _print("    Fix the error above and restart the server.")
+        _print(f"\n❌  Download failed: {e}")
+        _print("    Check your internet connection and restart the server.")
         sys.exit(1)
+
+    _prepend_bin_to_path()
 
     if not shutil.which("sipp"):
-        _print("\n❌  Build succeeded but 'sipp' is still not in PATH.")
-        _print("    Try: export PATH=$PATH:/usr/local/bin")
+        _print("\n❌  Download succeeded but 'sipp' is still not found.")
+        _print(f"    Binary is at: {SIPP_BIN}")
         sys.exit(1)
 
-    _print("\n✅  SIPp built and installed successfully!\n")
-    _print("═" * 60 + "\n")
+
+def _prepend_bin_to_path():
+    """Add ~/.local/bin to PATH for this process if not already there."""
+    if SIPP_BIN_DIR not in os.environ.get("PATH", ""):
+        os.environ["PATH"] = SIPP_BIN_DIR + os.pathsep + os.environ.get("PATH", "")
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Global state for jobs
@@ -120,6 +141,7 @@ def ensure_sipp():
 running_processes = {}
 job_counter = 0
 lock = threading.Lock()
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Build SIPp command from request params
@@ -138,385 +160,213 @@ def build_sipp_command(params: dict) -> list:
     elif scenario:
         cmd += ["-sf", scenario]
 
-    if params.get("sip_user"):   cmd += ["-s",  params["sip_user"]]
-    if params.get("sip_pass"):   cmd += ["-ap", params["sip_pass"]]
-    if params.get("local_ip"):   cmd += ["-i",  params["local_ip"]]
-    if params.get("local_port"): cmd += ["-p",  params["local_port"]]
+    remote_host = params.get("remote_host", "").strip()
+    if remote_host:
+        cmd.append(remote_host)
 
-    cmd += ["-r", params.get("call_rate",  "1")]
-    cmd += ["-m", params.get("max_calls",  "10")]
-    cmd += ["-l", params.get("conc_calls", "10")]
-    cmd += ["-t", params.get("transport",  "u")]
+    mapping = {
+        "transport":    "-t",
+        "calls":        "-l",
+        "rate":         "-r",
+        "duration":     "-d",
+        "local_port":   "-p",
+        "local_ip":     "-i",
+        "auth_uri":     "-au",
+        "auth_passwd":  "-ap",
+        "service":      "-s",
+    }
+    for key, flag in mapping.items():
+        val = params.get(key, "").strip()
+        if val:
+            cmd += [flag, val]
 
     extra = params.get("extra_args", "").strip()
     if extra:
         cmd += shlex.split(extra)
 
-    remote = params["remote_host"] + ":" + params.get("remote_port", "5060")
-    cmd.append(remote)
     return cmd
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Stream process output into job record
-# ─────────────────────────────────────────────────────────────────────────────
-def stream_output(job_id: int, proc):
-    job = running_processes[job_id]
-    try:
-        for line in iter(proc.stdout.readline, b""):
-            with lock:
-                job["output"].append(line.decode("utf-8", errors="replace"))
-        proc.wait()
-        with lock:
-            job["status"] = "error" if proc.returncode != 0 else "done"
-    except Exception as e:
-        with lock:
-            job["output"].append(f"\n[stream error: {e}]\n")
-            job["status"] = "error"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# HTML
+# Stream job output into memory
+# ─────────────────────────────────────────────────────────────────────────────
+def stream_output(job_id: int, proc):
+    for line in iter(proc.stdout.readline, b""):
+        decoded = line.decode("utf-8", errors="replace")
+        with lock:
+            if job_id in running_processes:
+                running_processes[job_id]["output"].append(decoded)
+    proc.wait()
+    with lock:
+        if job_id in running_processes:
+            running_processes[job_id]["status"] = "done"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# HTML UI
 # ─────────────────────────────────────────────────────────────────────────────
 HTML_PAGE = r"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>SIPp Web UI</title>
 <style>
-*{box-sizing:border-box;margin:0;padding:0}
-body{font-family:'Segoe UI',sans-serif;background:#0f172a;color:#e2e8f0;min-height:100vh}
-header{background:#1e293b;padding:16px 32px;border-bottom:2px solid #334155;
-       display:flex;align-items:center;gap:16px}
-header h1{font-size:1.45rem;font-weight:700;color:#38bdf8;letter-spacing:.5px}
-.sipp-ver{font-size:.78rem;background:#0ea5e940;color:#7dd3fc;padding:3px 10px;
-          border-radius:20px;border:1px solid #0ea5e960}
-.tabs{display:flex;gap:0;border-bottom:2px solid #334155;background:#1e293b;padding:0 28px}
-.tab{padding:12px 24px;cursor:pointer;font-size:.9rem;color:#94a3b8;border-bottom:3px solid transparent;transition:.2s}
-.tab.active,.tab:hover{color:#38bdf8;border-bottom-color:#38bdf8}
-.tab-content{display:none}.tab-content.active{display:block}
-.container{max-width:900px;margin:32px auto;padding:0 20px}
-.card{background:#1e293b;border-radius:12px;padding:28px;margin-bottom:24px;border:1px solid #334155}
-.card h2{font-size:1.1rem;color:#38bdf8;margin-bottom:18px;font-weight:600}
-.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
-@media(max-width:600px){.form-grid{grid-template-columns:1fr}}
-label{display:block;font-size:.78rem;text-transform:uppercase;letter-spacing:1px;
-      color:#64748b;margin-bottom:4px}
-input,select,textarea{width:100%;background:#0f172a;border:1px solid #334155;
-  color:#e2e8f0;border-radius:7px;padding:9px 12px;font-size:.92rem;outline:none;
-  transition:border .2s}
-input:focus,select:focus,textarea:focus{border-color:#38bdf8}
-textarea{resize:vertical;min-height:80px;font-family:monospace;font-size:.82rem}
-.btn{padding:10px 22px;border:none;border-radius:8px;cursor:pointer;font-size:.9rem;
-     font-weight:600;transition:.2s}
-.btn-primary{background:#0ea5e9;color:#fff}.btn-primary:hover{background:#38bdf8}
-.btn-danger{background:#ef4444;color:#fff}.btn-danger:hover{background:#f87171}
-.btn-sm{padding:6px 14px;font-size:.8rem}
-.btn-row{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px}
-.cmd-preview{background:#0f172a;border:1px solid #334155;border-radius:7px;
-             padding:10px 14px;font-family:monospace;font-size:.8rem;color:#7dd3fc;
-             word-break:break-all;margin-top:6px}
-table{width:100%;border-collapse:collapse;font-size:.88rem}
-th{text-align:left;padding:10px 12px;color:#64748b;border-bottom:1px solid #334155;
-   font-size:.75rem;text-transform:uppercase;letter-spacing:.8px}
-td{padding:10px 12px;border-bottom:1px solid #1e293b;vertical-align:middle}
-tr:hover td{background:#0f172a30}
-.badge{display:inline-block;padding:3px 10px;border-radius:20px;font-size:.75rem;font-weight:600}
-.badge-running{background:#0ea5e920;color:#38bdf8;border:1px solid #0ea5e940}
-.badge-done{background:#10b98120;color:#34d399;border:1px solid #10b98140}
-.badge-error{background:#ef444420;color:#f87171;border:1px solid #ef444440}
-#logModal{display:none;position:fixed;inset:0;background:#000a;z-index:100;
-          align-items:center;justify-content:center}
-#logModal.open{display:flex}
-.modal-box{background:#1e293b;border-radius:12px;padding:24px;width:90%;max-width:780px;
-           border:1px solid #334155;max-height:85vh;display:flex;flex-direction:column;gap:12px}
-.log-box{background:#0f172a;border-radius:8px;padding:14px;font-family:monospace;
-         font-size:.8rem;color:#94a3b8;overflow-y:auto;flex:1;white-space:pre-wrap;
-         max-height:55vh}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:system-ui,sans-serif;background:#0f172a;color:#e2e8f0;min-height:100vh;padding:2rem}
+  h1{color:#38bdf8;margin-bottom:1.5rem;font-size:1.8rem}
+  .card{background:#1e293b;border-radius:.75rem;padding:1.5rem;margin-bottom:1.5rem}
+  h2{color:#94a3b8;font-size:1rem;text-transform:uppercase;letter-spacing:.05em;margin-bottom:1rem}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:.75rem}
+  label{display:flex;flex-direction:column;gap:.25rem;font-size:.875rem;color:#94a3b8}
+  input,select,textarea{background:#0f172a;border:1px solid #334155;border-radius:.375rem;
+    color:#e2e8f0;padding:.5rem .75rem;font-size:.875rem;width:100%}
+  textarea{resize:vertical;min-height:120px;font-family:monospace}
+  .btn{cursor:pointer;border:none;border-radius:.5rem;padding:.6rem 1.4rem;
+    font-size:.875rem;font-weight:600;transition:opacity .15s}
+  .btn-blue{background:#0284c7;color:#fff} .btn-blue:hover{opacity:.85}
+  .btn-red{background:#dc2626;color:#fff}  .btn-red:hover{opacity:.85}
+  .btn-gray{background:#334155;color:#e2e8f0} .btn-gray:hover{opacity:.85}
+  .btn-row{display:flex;gap:.75rem;flex-wrap:wrap;margin-top:1rem}
+  #jobs{display:flex;flex-direction:column;gap:.75rem}
+  .job{background:#0f172a;border:1px solid #334155;border-radius:.5rem;padding:1rem}
+  .job-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:.5rem}
+  .badge{display:inline-block;padding:.15rem .5rem;border-radius:9999px;font-size:.75rem;font-weight:600}
+  .badge-running{background:#166534;color:#bbf7d0} .badge-done{background:#334155;color:#94a3b8}
+  .log{background:#020617;color:#a3e635;font-family:monospace;font-size:.75rem;
+    border-radius:.375rem;padding:.75rem;max-height:220px;overflow-y:auto;white-space:pre-wrap;margin-top:.5rem}
+  #ver{color:#64748b;font-size:.8rem;margin-bottom:1rem}
 </style>
 </head>
 <body>
-<header>
-  <h1>📡 SIPp Web UI</h1>
-  <span class="sipp-ver" id="sippVer">loading…</span>
-</header>
+<h1>🚀 SIPp Web UI</h1>
+<div id="ver">Checking SIPp version…</div>
 
-<div class="tabs">
-  <div class="tab active" onclick="switchTab('launch',this)">🚀 Launch</div>
-  <div class="tab" onclick="switchTab('jobs',this)">📋 Jobs</div>
-</div>
-
-<!-- ══════════════ LAUNCH TAB ══════════════ -->
-<div id="tab-launch" class="tab-content active">
-<div class="container">
-  <div class="card">
-    <h2>🎯 Target</h2>
-    <div class="form-grid">
-      <div>
-        <label>Remote Host *</label>
-        <input id="remoteHost" placeholder="192.168.1.100" oninput="updatePreview()"/>
-      </div>
-      <div>
-        <label>Remote Port</label>
-        <input id="remotePort" value="5060" oninput="updatePreview()"/>
-      </div>
-    </div>
+<div class="card">
+  <h2>Launch SIPp Test</h2>
+  <div class="grid">
+    <label>Remote Host (required)
+      <input id="remote_host" placeholder="192.168.1.1:5060"/>
+    </label>
+    <label>Transport
+      <select id="transport">
+        <option value="">default</option>
+        <option value="u1">UDP (u1)</option>
+        <option value="t1">TCP (t1)</option>
+        <option value="l1">TLS (l1)</option>
+      </select>
+    </label>
+    <label>Max Calls (-l)
+      <input id="calls" placeholder="100"/>
+    </label>
+    <label>Call Rate (-r)
+      <input id="rate" placeholder="10"/>
+    </label>
+    <label>Duration ms (-d)
+      <input id="duration" placeholder="5000"/>
+    </label>
+    <label>Local Port (-p)
+      <input id="local_port" placeholder="5060"/>
+    </label>
+    <label>Local IP (-i)
+      <input id="local_ip" placeholder=""/>
+    </label>
+    <label>Auth User (-au)
+      <input id="auth_uri" placeholder=""/>
+    </label>
+    <label>Auth Pass (-ap)
+      <input id="auth_passwd" type="password" placeholder=""/>
+    </label>
+    <label>Service (-s)
+      <input id="service" placeholder="service"/>
+    </label>
   </div>
-
-  <div class="card">
-    <h2>👤 SIP Credentials</h2>
-    <div class="form-grid">
-      <div>
-        <label>SIP User (-s)</label>
-        <input id="sipUser" placeholder="1000" oninput="updatePreview()"/>
-      </div>
-      <div>
-        <label>SIP Password (-ap)</label>
-        <input id="sipPass" placeholder="secret" type="password" oninput="updatePreview()"/>
-      </div>
-      <div>
-        <label>Local IP (-i)</label>
-        <input id="localIp" placeholder="auto" oninput="updatePreview()"/>
-      </div>
-      <div>
-        <label>Local Port (-p)</label>
-        <input id="localPort" placeholder="5080" oninput="updatePreview()"/>
-      </div>
-    </div>
-  </div>
-
-  <div class="card">
-    <h2>⚙️ Load Parameters</h2>
-    <div class="form-grid">
-      <div>
-        <label>Call Rate / s (-r)</label>
-        <input id="callRate" value="1" oninput="updatePreview()"/>
-      </div>
-      <div>
-        <label>Max Calls (-m)</label>
-        <input id="maxCalls" value="10" oninput="updatePreview()"/>
-      </div>
-      <div>
-        <label>Concurrent Calls (-l)</label>
-        <input id="concCalls" value="10" oninput="updatePreview()"/>
-      </div>
-      <div>
-        <label>Transport (-t)</label>
-        <select id="transport" onchange="updatePreview()">
-          <option value="u">UDP (u)</option>
-          <option value="t">TCP (t)</option>
-          <option value="l">TLS (l)</option>
-        </select>
-      </div>
-    </div>
-  </div>
-
-  <div class="card">
-    <h2>📄 Scenario</h2>
-    <div>
-      <label>Scenario File Path (-sf)</label>
-      <input id="scenario" placeholder="/path/to/scenario.xml  (leave blank to paste XML below)"
-             oninput="updatePreview()"/>
-    </div>
-    <div style="margin-top:14px">
-      <label>Inline Scenario XML (paste here)</label>
-      <textarea id="scenarioXml" placeholder="Paste your SIPp XML scenario here..."></textarea>
-    </div>
-
-    <div style="margin-top:14px">
-      <label style="text-transform:uppercase;letter-spacing:1px;font-size:.76rem;color:#64748b">
-        Command Preview
-      </label>
-      <div class="cmd-preview" id="cmdPreview">sipp ...</div>
-    </div>
-
-    <div class="btn-row">
-      <button class="btn btn-primary" onclick="launchSipp()">▶&nbsp; Launch</button>
-      <button class="btn" style="background:#334155;color:#e2e8f0" onclick="updatePreview()">
-        🔄&nbsp;Refresh Preview
-      </button>
-    </div>
+  <label style="margin-top:.75rem">Scenario file path (-sf) — leave blank to use inline XML below
+    <input id="scenario" placeholder="/path/to/scenario.xml"/>
+  </label>
+  <label style="margin-top:.75rem">Inline Scenario XML (overrides path above)
+    <textarea id="scenario_xml" placeholder="Paste XML here…"></textarea>
+  </label>
+  <label style="margin-top:.75rem">Extra CLI args
+    <input id="extra_args" placeholder="-timeout 30s -aa"/>
+  </label>
+  <div class="btn-row">
+    <button class="btn btn-blue" onclick="launch()">▶ Launch</button>
+    <button class="btn btn-red"  onclick="killAll()">⏹ Kill All</button>
   </div>
 </div>
-</div>
 
-<!-- ══════════════ JOBS TAB ══════════════ -->
-<div id="tab-jobs" class="tab-content">
-<div class="container">
-  <div class="card">
-    <h2>📋 Running / Recent Jobs</h2>
-    <div id="jobsTable">
-      <p style="color:#64748b;font-size:.9rem">No jobs yet — launch a test first.</p>
-    </div>
-    <div class="btn-row">
-      <button class="btn btn-sm" style="background:#334155;color:#e2e8f0" onclick="refreshJobs()">
-        🔄&nbsp;Refresh
-      </button>
-      <button class="btn btn-sm btn-danger" onclick="killAll()">⛔&nbsp;Kill All</button>
-    </div>
-  </div>
-</div>
-</div>
-
-<!-- ══════════════ LOG MODAL ══════════════ -->
-<div id="logModal">
-  <div class="modal-box">
-    <div style="display:flex;align-items:center;gap:10px">
-      <h3 id="modalTitle">Output</h3>
-      <button class="btn btn-sm" style="background:#334155;color:#e2e8f0;margin-left:auto"
-              onclick="closeModal()">✕ Close</button>
-    </div>
-    <div class="log-box" id="modalLog">Loading...</div>
-    <button class="btn btn-sm" style="background:#334155;color:#e2e8f0;width:fit-content"
-            onclick="refreshModal()">🔄 Refresh</button>
-  </div>
+<div class="card">
+  <h2>Active / Recent Jobs</h2>
+  <div id="jobs"><em style="color:#64748b">No jobs yet.</em></div>
 </div>
 
 <script>
-let currentJobId = null;
-
-// ── version badge ─────────────────────────────────────────────────────────
-fetch('/api/sipp_version').then(r=>r.json()).then(d=>{
-  document.getElementById('sippVer').textContent = d.version || 'SIPp ready';
-});
-
-// ── tabs ──────────────────────────────────────────────────────────────────
-function switchTab(name, el) {
-  document.querySelectorAll('.tab-content').forEach(t=>t.classList.remove('active'));
-  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
-  document.getElementById('tab-'+name).classList.add('active');
-  el.classList.add('active');
-  if (name==='jobs') refreshJobs();
+const $=id=>document.getElementById(id);
+async function api(path,body){
+  const opts=body?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}:{};
+  const r=await fetch(path,opts);return r.json();
 }
-
-// ── command builder ───────────────────────────────────────────────────────
-function buildCmd() {
-  const host = document.getElementById('remoteHost').value.trim();
-  if (!host) return 'sipp ...';
-  const port   = document.getElementById('remotePort').value.trim() || '5060';
-  const user   = document.getElementById('sipUser').value.trim();
-  const pass   = document.getElementById('sipPass').value.trim();
-  const lip    = document.getElementById('localIp').value.trim();
-  const lport  = document.getElementById('localPort').value.trim();
-  const rate   = document.getElementById('callRate').value.trim() || '1';
-  const maxc   = document.getElementById('maxCalls').value.trim() || '10';
-  const conc   = document.getElementById('concCalls').value.trim() || '10';
-  const trans  = document.getElementById('transport').value;
-  const scen   = document.getElementById('scenario').value.trim();
-  const xml    = document.getElementById('scenarioXml').value.trim();
-  let cmd = 'sipp';
-  if (xml)   cmd += ' -sf /tmp/sipp_scenario.xml';
-  else if (scen) cmd += ` -sf ${scen}`;
-  if (user)  cmd += ` -s ${user}`;
-  if (pass)  cmd += ` -ap ${pass}`;
-  if (lip)   cmd += ` -i ${lip}`;
-  if (lport) cmd += ` -p ${lport}`;
-  cmd += ` -r ${rate} -m ${maxc} -l ${conc} -t ${trans}`;
-  cmd += ` ${host}:${port}`;
-  return cmd;
-}
-function updatePreview() {
-  document.getElementById('cmdPreview').textContent = buildCmd();
-}
-
-// ── launch ────────────────────────────────────────────────────────────────
-function launchSipp() {
-  const host = document.getElementById('remoteHost').value.trim();
-  if (!host) { alert('Remote Host is required'); return; }
-  const payload = {
-    remote_host:  host,
-    remote_port:  document.getElementById('remotePort').value.trim() || '5060',
-    sip_user:     document.getElementById('sipUser').value.trim(),
-    sip_pass:     document.getElementById('sipPass').value.trim(),
-    local_ip:     document.getElementById('localIp').value.trim(),
-    local_port:   document.getElementById('localPort').value.trim(),
-    call_rate:    document.getElementById('callRate').value.trim() || '1',
-    max_calls:    document.getElementById('maxCalls').value.trim() || '10',
-    conc_calls:   document.getElementById('concCalls').value.trim() || '10',
-    transport:    document.getElementById('transport').value,
-    scenario:     document.getElementById('scenario').value.trim(),
-    scenario_xml: document.getElementById('scenarioXml').value.trim(),
+async function launch(){
+  const params={
+    remote_host:$('remote_host').value.trim(),
+    transport:$('transport').value,
+    calls:$('calls').value.trim(),
+    rate:$('rate').value.trim(),
+    duration:$('duration').value.trim(),
+    local_port:$('local_port').value.trim(),
+    local_ip:$('local_ip').value.trim(),
+    auth_uri:$('auth_uri').value.trim(),
+    auth_passwd:$('auth_passwd').value.trim(),
+    service:$('service').value.trim(),
+    scenario:$('scenario').value.trim(),
+    scenario_xml:$('scenario_xml').value.trim(),
+    extra_args:$('extra_args').value.trim(),
   };
-  fetch('/api/launch', {method:'POST', headers:{'Content-Type':'application/json'},
-                        body:JSON.stringify(payload)})
-    .then(r=>r.json()).then(d=>{
-      if (d.error) { alert('Error: '+d.error); return; }
-      alert(`✅ Job #${d.job_id} started (PID ${d.pid})`);
-      switchTab('jobs', document.querySelectorAll('.tab')[1]);
-    });
+  const res=await api('/api/launch',params);
+  if(res.error){alert('Error: '+res.error);return;}
+  alert('Launched job #'+res.job_id+' PID '+res.pid);
+  refreshJobs();
 }
-
-// ── jobs table ────────────────────────────────────────────────────────────
-function refreshJobs() {
-  fetch('/api/jobs').then(r=>r.json()).then(jobs=>{
-    const el = document.getElementById('jobsTable');
-    if (!jobs.length) {
-      el.innerHTML = '<p style="color:#64748b;font-size:.9rem">No jobs yet — launch a test first.</p>';
-      return;
-    }
-    let html = `<table><thead><tr>
-      <th>#</th><th>Command</th><th>PID</th><th>Status</th><th>Actions</th>
-    </tr></thead><tbody>`;
-    for (const j of jobs) {
-      const badge = j.status==='running'
-        ? '<span class="badge badge-running">running</span>'
-        : j.status==='done'
-        ? '<span class="badge badge-done">done</span>'
-        : '<span class="badge badge-error">error</span>';
-      const cmd = j.cmd.length>60 ? j.cmd.slice(0,60)+'…' : j.cmd;
-      html += `<tr>
-        <td>${j.job_id}</td>
-        <td style="font-family:monospace;font-size:.78rem;color:#7dd3fc">${cmd}</td>
-        <td>${j.pid||'—'}</td>
-        <td>${badge}</td>
-        <td>
-          <button class="btn btn-sm" style="background:#334155;color:#e2e8f0"
-                  onclick="showLog(${j.job_id})">📄 Log</button>
-          ${j.status==='running'
-            ? `<button class="btn btn-sm btn-danger" onclick="killJob(${j.job_id})">⛔ Kill</button>`
-            : ''}
-        </td>
-      </tr>`;
-    }
-    html += '</tbody></table>';
-    el.innerHTML = html;
-  });
+async function killJob(id){await api('/api/kill',{job_id:id});refreshJobs();}
+async function killAll(){await api('/api/kill_all',{});refreshJobs();}
+async function refreshJobs(){
+  const jobs=await api('/api/jobs');
+  const el=$('jobs');
+  if(!jobs.length){el.innerHTML='<em style="color:#64748b">No jobs yet.</em>';return;}
+  el.innerHTML=jobs.map(j=>`
+    <div class="job">
+      <div class="job-header">
+        <span><strong>#${j.job_id}</strong> PID ${j.pid??'—'}</span>
+        <span class="badge badge-${j.status}">${j.status}</span>
+      </div>
+      <code style="font-size:.75rem;color:#64748b;word-break:break-all">${j.cmd}</code>
+      <div class="btn-row">
+        <button class="btn btn-gray" onclick="showLog(${j.job_id})">📋 Log</button>
+        ${j.status==='running'?`<button class="btn btn-red" onclick="killJob(${j.job_id})">⏹ Kill</button>`:''}
+      </div>
+      <div id="log-${j.job_id}" class="log" style="display:none"></div>
+    </div>`).join('');
 }
-
-function killJob(jid) {
-  fetch('/api/kill', {method:'POST', headers:{'Content-Type':'application/json'},
-                      body:JSON.stringify({job_id:jid})})
-    .then(()=>refreshJobs());
-}
-function killAll() {
-  fetch('/api/kill_all', {method:'POST'}).then(()=>refreshJobs());
-}
-
-// ── log modal ─────────────────────────────────────────────────────────────
-function showLog(jid) {
-  currentJobId = jid;
-  document.getElementById('modalTitle').textContent = `Job #${jid} Output`;
-  document.getElementById('logModal').classList.add('open');
-  refreshModal();
-}
-function refreshModal() {
-  if (!currentJobId) return;
-  fetch(`/api/log?job_id=${currentJobId}`).then(r=>r.json()).then(d=>{
-    const el=document.getElementById('modalLog');
-    el.textContent=d.output||'(no output yet)';
+async function showLog(id){
+  const el=document.getElementById('log-'+id);
+  if(el.style.display==='none'){
+    const r=await api('/api/log?job_id='+id);
+    el.textContent=r.output||'(no output yet)';
+    el.style.display='block';
     el.scrollTop=el.scrollHeight;
-  });
+  } else {el.style.display='none';}
 }
-function closeModal(){
-  document.getElementById('logModal').classList.remove('open');
-  currentJobId=null;
-}
-
-// auto-refresh jobs every 3 s
-setInterval(refreshJobs, 3000);
+(async()=>{
+  const r=await api('/api/sipp_version').catch(()=>({version:'SIPp ready'}));
+  $('ver').textContent='SIPp: '+r.version;
+})();
+setInterval(refreshJobs,3000);
 refreshJobs();
 </script>
 </body>
 </html>"""
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # HTTP Handler
@@ -563,7 +413,7 @@ class SippHandler(http.server.BaseHTTPRequestHandler):
                 raw = (r.stdout + r.stderr).strip()
                 ver = raw.splitlines()[0] if raw else "SIPp ready"
             except Exception:
-                ver = shutil.which("sipp") or "SIPp ready"
+                ver = shutil.which("sipp") or SIPP_BIN
             self.send_json({"version": ver})
 
         elif path == "/api/jobs":
