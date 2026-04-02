@@ -32,10 +32,8 @@ BUILD_DEPS = [
     "lksctp-tools",
 ]
 
-
 def _print(msg: str):
     print(msg, flush=True)
-
 
 def _run(cmd: list, cwd: str = None, check: bool = True) -> int:
     """Run a command, stream output to stdout, return exit code."""
@@ -54,20 +52,17 @@ def _run(cmd: list, cwd: str = None, check: bool = True) -> int:
         raise RuntimeError(f"Command failed (exit {proc.returncode}): {' '.join(cmd)}")
     return proc.returncode
 
-
 def install_deps():
     _print("\n[1/4] Installing build dependencies via apt-get...")
-    _run(["sudo", "apt-get", "update", "-y"], check=False)
-    _run(["sudo", "apt-get", "install", "-y"] + BUILD_DEPS)
-
+    _run(["apt-get", "update", "-y"], check=False)
+    _run(["apt-get", "install", "-y"] + BUILD_DEPS)
 
 def clone_sipp():
     _print("\n[2/4] Cloning SIPp source from GitHub...")
     if os.path.isdir(SIPP_SRC_DIR):
         _print(f"  Removing old source dir: {SIPP_SRC_DIR}")
-        _run(["rm", "-rf", SIPP_SRC_DIR])
+        shutil.rmtree(SIPP_SRC_DIR)
     _run(["git", "clone", "--depth=1", SIPP_REPO, SIPP_SRC_DIR])
-
 
 def build_sipp():
     _print("\n[3/4] Configuring with CMake...")
@@ -85,8 +80,7 @@ def build_sipp():
     cpu_count = str(os.cpu_count() or 2)
     _run(["make", f"-j{cpu_count}"], cwd=build_dir)
     _print("\n  Installing binary to /usr/local/bin/sipp ...")
-    _run(["sudo", "make", "install"], cwd=build_dir)
-
+    _run(["make", "install"], cwd=build_dir)
 
 def ensure_sipp():
     """
@@ -120,7 +114,6 @@ def ensure_sipp():
     _print("\n✅  SIPp built and installed successfully!\n")
     _print("═" * 60 + "\n")
 
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Global state for jobs
 # ─────────────────────────────────────────────────────────────────────────────
@@ -128,10 +121,9 @@ running_processes = {}
 job_counter = 0
 lock = threading.Lock()
 
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Build SIPp command from request params
-# ───────────────────────────────────────────────────────��─────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 def build_sipp_command(params: dict) -> list:
     cmd = ["sipp"]
 
@@ -164,7 +156,6 @@ def build_sipp_command(params: dict) -> list:
     cmd.append(remote)
     return cmd
 
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Stream process output into job record
 # ─────────────────────────────────────────────────────────────────────────────
@@ -181,7 +172,6 @@ def stream_output(job_id: int, proc):
         with lock:
             job["output"].append(f"\n[stream error: {e}]\n")
             job["status"] = "error"
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # HTML
@@ -506,9 +496,7 @@ setInterval(refreshJobs,3000);
 refreshJobs();
 </script>
 </body>
-</html>
-"""
-
+</html>""";
 
 # ─────────────────────────────────────────────────────────────────────────────
 # HTTP Handler
@@ -561,7 +549,7 @@ class SippHandler(http.server.BaseHTTPRequestHandler):
         elif path == "/api/jobs":
             with lock:
                 jobs = [
-                    {"job_id": jid, "cmd": j["cmd"],
+                    {"job_id": jid, "cmd": j["cmd",
                      "status": j["status"], "pid": j.get("pid")}
                     for jid, j in running_processes.items()
                 ]
@@ -579,7 +567,7 @@ class SippHandler(http.server.BaseHTTPRequestHandler):
             if not job:
                 self.send_json({"error": "job not found"}, 404)
                 return
-            self.send_json({"output": "".join(job["output"])})
+            self.send_json({"output": "".join(job["output"])}
 
         else:
             self.send_response(404)
@@ -666,7 +654,7 @@ if __name__ == "__main__":
     # ── 1. Build / verify SIPp BEFORE starting the HTTP server ──────────────
     ensure_sipp()
 
-    # ── 2. Start HTTP server ─���───────────────────────────────────────────────
+    # ── 2. Start HTTP server ─────────────────────────────────────────────────
     PORT = 8000
     server = http.server.HTTPServer(("0.0.0.0", PORT), SippHandler)
     _print(f"🌐  SIPp Web UI  →  http://0.0.0.0:{PORT}\n")
