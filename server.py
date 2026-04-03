@@ -31,18 +31,17 @@ import io
 # CONFIG
 # ─────────────────────────────────────────────────────────────
 
-EASYSIPP_REPO_ZIP  = "https://github.com/kiran-daware/easySIPp/archive/refs/heads/main.zip"
-EASYSIPP_DIR_NAME  = "easySIPp-main"   # top-level folder name inside the zip
-WORK_DIR           = os.path.join(os.path.dirname(os.path.abspath(__file__)), "easysipp_app")
-MANAGE_PY          = os.path.join(WORK_DIR, "manage.py")
-SETTINGS_PY        = os.path.join(WORK_DIR, "easySIPp_project", "settings.py")
-LOCAL_SETTINGS_PY  = os.path.join(WORK_DIR, "easySIPp_project", "local_settings.py")
-ASGI_APP           = "easySIPp_project.asgi:application"
-HOST               = "0.0.0.0"
-PORT               = 8000
+easysipp_repo_zip  = "https://github.com/kiran-daware/easySIPp/archive/refs/heads/main.zip"
+easysipp_dir_name  = "easySIPp-main"   # top-level folder name inside the zip
+work_dir           = os.path.join(os.path.dirname(os.path.abspath(__file__)), "easysipp_app")
+manage_py          = os.path.join(work_dir, "manage.py")
+settings_py        = os.path.join(work_dir, "easySIPp_project", "settings.py")
+asgi_app           = "easySIPp_project.asgi:application"
+host               = "0.0.0.0"
+port               = 8000
 
 # Minimal packages needed before we can read requirements.txt
-BOOTSTRAP_PACKAGES = {
+bootstrap_packages = {
     "django":   "django==4.2.21",
     "requests": "requests",
 }
@@ -74,7 +73,7 @@ def ensure_packages(packages: dict) -> None:
     print("[bootstrap] Bootstrap complete.")
 
 
-ensure_packages(BOOTSTRAP_PACKAGES)
+ensure_packages(bootstrap_packages)
 
 # ─────────────────────────────────────────────────────────────
 # STEP 2 — Imports safe now
@@ -93,15 +92,15 @@ log = logging.getLogger("easysipp")
 # ─────────────────────────────────────────────────────────────
 
 def download_easysipp() -> None:
-    if os.path.isfile(MANAGE_PY):
+    if os.path.isfile(manage_py):
         log.info("easySIPp source already present — skipping download.")
         return
 
     log.info("Downloading easySIPp source from GitHub ...")
-    data = urllib.request.urlopen(EASYSIPP_REPO_ZIP).read()
+    data = urllib.request.urlopen(easysipp_repo_zip).read()
     log.info("Downloaded %d KB. Extracting ...", len(data) // 1024)
 
-    tmp = WORK_DIR + "_tmp"
+    tmp = work_dir + "_tmp"
     if os.path.exists(tmp):
         shutil.rmtree(tmp)
     os.makedirs(tmp, exist_ok=True)
@@ -109,19 +108,19 @@ def download_easysipp() -> None:
     with zipfile.ZipFile(io.BytesIO(data)) as zf:
         zf.extractall(tmp)
 
-    src = os.path.join(tmp, EASYSIPP_DIR_NAME)
+    src = os.path.join(tmp, easysipp_dir_name)
     if not os.path.isdir(src):
         entries = [e for e in os.listdir(tmp) if os.path.isdir(os.path.join(tmp, e))]
         if entries:
             src = os.path.join(tmp, entries[0])
 
-    shutil.move(src, WORK_DIR)
+    shutil.move(src, work_dir)
     shutil.rmtree(tmp, ignore_errors=True)
-    log.info("Extracted to: %s", WORK_DIR)
+    log.info("Extracted to: %s", work_dir)
 
 
 def install_requirements() -> None:
-    req = os.path.join(WORK_DIR, "requirements.txt")
+    req = os.path.join(work_dir, "requirements.txt")
     if not os.path.isfile(req):
         log.warning("No requirements.txt — skipping.")
         return
@@ -129,56 +128,42 @@ def install_requirements() -> None:
     pip_install("-r", req)
     log.info("Requirements installed.")
 
-
 # ─────────────────────────────────────────────────────────────
-# STEP 4 — Patch settings to disable CSRF entirely
+# STEP 4 — Patch settings.py to disable CSRF
 #
-# easySIPp is a local-only tool (ALLOWED_HOSTS = ['*'] upstream).
-# CSRF protection is meaningless without authentication and adds
-# friction for any non-localhost origin.  We write a
-# local_settings.py that removes CsrfViewMiddleware and opens
-# CSRF_TRUSTED_ORIGINS to all origins, then ensure settings.py
-# imports it at the end.  Both operations are idempotent.
+# easySIPp is a local-only tool. CSRF protection adds friction
+# when accessing from any IP. We append an override block to
+# settings.py that removes CsrfViewMiddleware from MIDDLEWARE
+# and sets ALLOWED_HOSTS = ['*']. The patch is idempotent.
 # ─────────────────────────────────────────────────────────────
 
-LOCAL_SETTINGS_CONTENT = """
-# local_settings.py — written by server.py (auto-generated, do not edit manually)
-# Disables CSRF for local/self-hosted use where any IP may connect.
+settings_patch_marker = "# >>> easysipp-server csrf-patch >>>"
 
-# Remove CSRF middleware from whatever the base settings defined
-MIDDLEWARE = [m for m in MIDDLEWARE if 'csrf' not in m.lower()]
-
-# Accept requests from any origin
+settings_patch = """
+# >>> easysipp-server csrf-patch >>>
+# Appended by server.py — removes CSRF middleware for local/self-hosted use.
+MIDDLEWARE = [m for m in globals().get('MIDDLEWARE', MIDDLEWARE) if 'csrf' not in m.lower()]
 ALLOWED_HOSTS = ['*']
-CSRF_TRUSTED_ORIGINS = []  # irrelevant — middleware is removed above
-
-# Show errors clearly during self-hosted use
 DEBUG = True
-"""
-
-SETTINGS_IMPORT_LINE = "\ntry:\n    from .local_settings import *  # noqa: F401,F403\nexcept ImportError:\n    pass\n"
-
+# <<< easysipp-server csrf-patch <<<_"
+"
 
 def patch_settings() -> None:
-    if not os.path.isfile(SETTINGS_PY):
-        log.warning("settings.py not found at %s — skipping patch.", SETTINGS_PY)
+    if not os.path.isfile(settings_py):
+        log.warning("settings.py not found at %s — skipping patch.", settings_py)
         return
 
-    # Always (re)write local_settings.py so it stays current
-    with open(LOCAL_SETTINGS_PY, "w") as f:
-        f.write(LOCAL_SETTINGS_CONTENT)
-    log.info("Wrote local_settings.py (CSRF disabled, DEBUG=True).")
-
-    # Inject the import into settings.py exactly once
-    with open(SETTINGS_PY, "r") as f:
+    with open(settings_py, "r") as f:
         content = f.read()
 
-    if "local_settings" not in content:
-        with open(SETTINGS_PY, "a") as f:
-            f.write(SETTINGS_IMPORT_LINE)
-        log.info("Injected local_settings import into settings.py.")
-    else:
-        log.info("settings.py already imports local_settings — skipping injection.")
+    if settings_patch_marker in content:
+        log.info("settings.py already patched — skipping.")
+        return
+
+    with open(settings_py, "a") as f:
+        f.write(settings_patch)
+
+    log.info("Patched settings.py: CSRF middleware removed, ALLOWED_HOSTS=*, DEBUG=True.")
 
 
 # ─────────────────────────────────────────────────────────────
@@ -189,12 +174,11 @@ def django_manage(*args) -> None:
     env = os.environ.copy()
     env["DJANGO_SETTINGS_MODULE"] = "easySIPp_project.settings"
     subprocess.run(
-        [sys.executable, MANAGE_PY] + list(args),
-        cwd=WORK_DIR,
+        [sys.executable, manage_py] + list(args),
+        cwd=work_dir,
         env=env,
         check=True,
     )
-
 
 def setup_django() -> None:
     log.info("Running migrations ...")
@@ -217,7 +201,6 @@ def setup_django() -> None:
 
 server_proc: subprocess.Popen = None
 
-
 def start_server() -> None:
     global server_proc
     env = os.environ.copy()
@@ -225,25 +208,25 @@ def start_server() -> None:
 
     cmd = [
         sys.executable, "-m", "uvicorn",
-        ASGI_APP,
-        "--host", HOST,
-        "--port", str(PORT),
+        asgi_app,
+        "--host", host,
+        "--port", str(port),
         "--workers", "2",
     ]
     log.info("Starting uvicorn: %s", " ".join(cmd))
-    server_proc = subprocess.Popen(cmd, cwd=WORK_DIR, env=env)
+    server_proc = subprocess.Popen(cmd, cwd=work_dir, env=env)
     log.info(
         "\n"
         "  ┌────────────────────────────────────────────────┐\n"
         "  │  easySIPp is running                           │\n"
         "  │  Open: http://<your-server-ip>:%d             │\n"
         "  └────────────────────────────────────────────────┘",
-        PORT,
+        port,
     )
 
 
 def wait_for_server(timeout: int = 60) -> None:
-    url = f"http://127.0.0.1:{PORT}/"
+    url = f"http://127.0.0.1:{port}/"
     log.info("Waiting for server to be ready at %s ...", url)
     deadline = time.time() + timeout
     while time.time() < deadline:
@@ -257,7 +240,7 @@ def wait_for_server(timeout: int = 60) -> None:
 
 # ─────────────────────────────────────────────────────────────
 # STEP 7 — Graceful shutdown
-# ───────────────────────────────────────────────────────────���─
+# ─────────────────────────────────────────────────────────────
 
 def shutdown(signum=None, frame=None) -> None:
     log.info("Shutting down ...")
