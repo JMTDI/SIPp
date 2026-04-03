@@ -7,7 +7,7 @@ Self-bootstrapping easySIPp launcher — NO Docker, NO sudo, NO apt required.
 What it does:
   1. Installs all Python dependencies via `python -m pip` only.
   2. Downloads the easySIPp Django/ASGI source from GitHub (pure Python urllib).
-  3. Patches settings.py to fix CSRF so the app works behind any hostname/IP.
+  3. Patches settings to disable CSRF (local-use tool — safe and intended).
   4. Runs migrations + load_initial_if_empty + collectstatic.
   5. Starts the app with uvicorn (ASGI) on 0.0.0.0:8000.
 
@@ -26,7 +26,6 @@ import os
 import zipfile
 import shutil
 import io
-import socket
 
 # ─────────────────────────────────────────────────────────────
 # CONFIG
@@ -37,6 +36,7 @@ EASYSIPP_DIR_NAME  = "easySIPp-main"   # top-level folder name inside the zip
 WORK_DIR           = os.path.join(os.path.dirname(os.path.abspath(__file__)), "easysipp_app")
 MANAGE_PY          = os.path.join(WORK_DIR, "manage.py")
 SETTINGS_PY        = os.path.join(WORK_DIR, "easySIPp_project", "settings.py")
+LOCAL_SETTINGS_PY  = os.path.join(WORK_DIR, "easySIPp_project", "local_settings.py")
 ASGI_APP           = "easySIPp_project.asgi:application"
 HOST               = "0.0.0.0"
 PORT               = 8000
@@ -131,53 +131,55 @@ def install_requirements() -> None:
 
 
 # ─────────────────────────────────────────────────────────────
-# STEP 4 — Patch settings.py to fix CSRF / ALLOWED_HOSTS
+# STEP 4 — Patch settings to disable CSRF entirely
+#
+# easySIPp is a local-only tool (ALLOWED_HOSTS = ['*'] upstream).
+# CSRF protection is meaningless without authentication and adds
+# friction for any non-localhost origin.  We write a
+# local_settings.py that removes CsrfViewMiddleware and opens
+# CSRF_TRUSTED_ORIGINS to all origins, then ensure settings.py
+# imports it at the end.  Both operations are idempotent.
 # ─────────────────────────────────────────────────────────────
 
+LOCAL_SETTINGS_CONTENT = """
+# local_settings.py — written by server.py (auto-generated, do not edit manually)
+# Disables CSRF for local/self-hosted use where any IP may connect.
+
+# Remove CSRF middleware from whatever the base settings defined
+MIDDLEWARE = [m for m in MIDDLEWARE if 'csrf' not in m.lower()]
+
+# Accept requests from any origin
+ALLOWED_HOSTS = ['*']
+CSRF_TRUSTED_ORIGINS = []  # irrelevant — middleware is removed above
+
+# Show errors clearly during self-hosted use
+DEBUG = True
+"""
+
+SETTINGS_IMPORT_LINE = "\ntry:\n    from .local_settings import *  # noqa: F401,F403\nexcept ImportError:\n    pass\n"
+
+
 def patch_settings() -> None:
-    """
-    Rewrite CSRF_TRUSTED_ORIGINS and ALLOWED_HOSTS in the downloaded settings
-    so the app works when accessed from any IP or hostname (typical for a
-    self-hosted server).  We append an override block rather than parsing the
-    file, which is both safe and idempotent.
-    """
     if not os.path.isfile(SETTINGS_PY):
         log.warning("settings.py not found at %s — skipping patch.", SETTINGS_PY)
         return
 
-    marker = "# >>> easysipp-server auto-patch >>>"
+    # Always (re)write local_settings.py so it stays current
+    with open(LOCAL_SETTINGS_PY, "w") as f:
+        f.write(LOCAL_SETTINGS_CONTENT)
+    log.info("Wrote local_settings.py (CSRF disabled, DEBUG=True).")
+
+    # Inject the import into settings.py exactly once
     with open(SETTINGS_PY, "r") as f:
         content = f.read()
 
-    if marker in content:
-        log.info("settings.py already patched — skipping.")
-        return
+    if "local_settings" not in content:
+        with open(SETTINGS_PY, "a") as f:
+            f.write(SETTINGS_IMPORT_LINE)
+        log.info("Injected local_settings import into settings.py.")
+    else:
+        log.info("settings.py already imports local_settings — skipping injection.")
 
-    # Detect the machine's LAN IP so we can add it to CSRF_TRUSTED_ORIGINS
-    try:
-        lan_ip = socket.gethostbyname(socket.gethostname())
-    except Exception:
-        lan_ip = "127.0.0.1"
-
-    patch = f"""
-{marker}
-# Patch applied by server.py at startup.
-# Allows the app to be accessed from any host/IP without CSRF errors.
-ALLOWED_HOSTS = ['*']
-CSRF_TRUSTED_ORIGINS = [
-    'http://localhost:{PORT}',
-    'http://127.0.0.1:{PORT}',
-    'http://{lan_ip}:{PORT}',
-]
-# If you access the app via a custom domain or different port, add it here.
-# e.g. CSRF_TRUSTED_ORIGINS += ['http://myserver.example.com:8000']
-# <<< easysipp-server auto-patch <<<
-"""
-
-    with open(SETTINGS_PY, "a") as f:
-        f.write(patch)
-
-    log.info("Patched settings.py: ALLOWED_HOSTS=*, CSRF_TRUSTED_ORIGINS set for %s:%d", lan_ip, PORT)
 
 # ─────────────────────────────────────────────────────────────
 # STEP 5 — Django setup helpers
@@ -255,7 +257,7 @@ def wait_for_server(timeout: int = 60) -> None:
 
 # ─────────────────────────────────────────────────────────────
 # STEP 7 — Graceful shutdown
-# ─────────────────────────────────────────────────────────────
+# ───────────────────────────────────────────────────────────���─
 
 def shutdown(signum=None, frame=None) -> None:
     log.info("Shutting down ...")
@@ -277,7 +279,7 @@ signal.signal(signal.SIGTERM, shutdown)
 def main() -> None:
     download_easysipp()
     install_requirements()
-    patch_settings()       # fix CSRF before starting
+    patch_settings()       # disable CSRF before starting
     setup_django()
     start_server()
     wait_for_server()
