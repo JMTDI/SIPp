@@ -7,8 +7,9 @@ Self-bootstrapping easySIPp launcher — NO Docker, NO sudo, NO apt required.
 What it does:
   1. Installs all Python dependencies via `python -m pip` only.
   2. Downloads the easySIPp Django/ASGI source from GitHub (pure Python urllib).
-  3. Runs migrations + load_initial_if_empty + collectstatic.
-  4. Starts the app with uvicorn (ASGI) on 0.0.0.0:8000.
+  3. Patches settings.py to fix CSRF so the app works behind any hostname/IP.
+  4. Runs migrations + load_initial_if_empty + collectstatic.
+  5. Starts the app with uvicorn (ASGI) on 0.0.0.0:8000.
 
 Requirements on the host:
   - python3 (3.6+)
@@ -25,6 +26,7 @@ import os
 import zipfile
 import shutil
 import io
+import socket
 
 # ─────────────────────────────────────────────────────────────
 # CONFIG
@@ -34,6 +36,7 @@ EASYSIPP_REPO_ZIP  = "https://github.com/kiran-daware/easySIPp/archive/refs/head
 EASYSIPP_DIR_NAME  = "easySIPp-main"   # top-level folder name inside the zip
 WORK_DIR           = os.path.join(os.path.dirname(os.path.abspath(__file__)), "easysipp_app")
 MANAGE_PY          = os.path.join(WORK_DIR, "manage.py")
+SETTINGS_PY        = os.path.join(WORK_DIR, "easySIPp_project", "settings.py")
 ASGI_APP           = "easySIPp_project.asgi:application"
 HOST               = "0.0.0.0"
 PORT               = 8000
@@ -128,7 +131,56 @@ def install_requirements() -> None:
 
 
 # ─────────────────────────────────────────────────────────────
-# STEP 4 — Django setup helpers
+# STEP 4 — Patch settings.py to fix CSRF / ALLOWED_HOSTS
+# ─────────────────────────────────────────────────────────────
+
+def patch_settings() -> None:
+    """
+    Rewrite CSRF_TRUSTED_ORIGINS and ALLOWED_HOSTS in the downloaded settings
+    so the app works when accessed from any IP or hostname (typical for a
+    self-hosted server).  We append an override block rather than parsing the
+    file, which is both safe and idempotent.
+    """
+    if not os.path.isfile(SETTINGS_PY):
+        log.warning("settings.py not found at %s — skipping patch.", SETTINGS_PY)
+        return
+
+    marker = "# >>> easysipp-server auto-patch >>>"
+    with open(SETTINGS_PY, "r") as f:
+        content = f.read()
+
+    if marker in content:
+        log.info("settings.py already patched — skipping.")
+        return
+
+    # Detect the machine's LAN IP so we can add it to CSRF_TRUSTED_ORIGINS
+    try:
+        lan_ip = socket.gethostbyname(socket.gethostname())
+    except Exception:
+        lan_ip = "127.0.0.1"
+
+    patch = f"""
+{marker}
+# Patch applied by server.py at startup.
+# Allows the app to be accessed from any host/IP without CSRF errors.
+ALLOWED_HOSTS = ['*']
+CSRF_TRUSTED_ORIGINS = [
+    'http://localhost:{PORT}',
+    'http://127.0.0.1:{PORT}',
+    'http://{lan_ip}:{PORT}',
+]
+# If you access the app via a custom domain or different port, add it here.
+# e.g. CSRF_TRUSTED_ORIGINS += ['http://myserver.example.com:8000']
+# <<< easysipp-server auto-patch <<<
+"""
+
+    with open(SETTINGS_PY, "a") as f:
+        f.write(patch)
+
+    log.info("Patched settings.py: ALLOWED_HOSTS=*, CSRF_TRUSTED_ORIGINS set for %s:%d", lan_ip, PORT)
+
+# ─────────────────────────────────────────────────────────────
+# STEP 5 — Django setup helpers
 # ─────────────────────────────────────────────────────────────
 
 def django_manage(*args) -> None:
@@ -157,9 +209,8 @@ def setup_django() -> None:
 
     log.info("Django setup complete.")
 
-
 # ─────────────────────────────────────────────────────────────
-# STEP 5 — Run uvicorn (ASGI server)
+# STEP 6 — Run uvicorn (ASGI server)
 # ─────────────────────────────────────────────────────────────
 
 server_proc: subprocess.Popen = None
@@ -202,9 +253,8 @@ def wait_for_server(timeout: int = 60) -> None:
             time.sleep(1)
     log.warning("Server did not respond within %ds — it may still be starting.", timeout)
 
-
 # ─────────────────────────────────────────────────────────────
-# STEP 6 — Graceful shutdown
+# STEP 7 — Graceful shutdown
 # ─────────────────────────────────────────────────────────────
 
 def shutdown(signum=None, frame=None) -> None:
@@ -227,6 +277,7 @@ signal.signal(signal.SIGTERM, shutdown)
 def main() -> None:
     download_easysipp()
     install_requirements()
+    patch_settings()       # fix CSRF before starting
     setup_django()
     start_server()
     wait_for_server()
