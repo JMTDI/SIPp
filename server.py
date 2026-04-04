@@ -4,12 +4,19 @@ server.py
 ---------
 Self-bootstrapping easySIPp launcher — NO Docker, NO sudo, NO apt required.
 
+devpush.app pattern (same as Odoo):
+  - Python reverse proxy binds :8000 IMMEDIATELY (devpush health-check passes)
+  - uvicorn runs internally on :8080
+  - Proxy forwards every request :8000 → :8080
+
 What it does:
-  1. Installs all Python dependencies via `python -m pip` only.
-  2. Downloads the easySIPp Django/ASGI source from GitHub (pure Python urllib).
-  3. Patches settings to disable CSRF (local-use tool — safe and intended).
-  4. Runs migrations + load_initial_if_empty + collectstatic.
-  5. Starts the app with uvicorn (ASGI) on 0.0.0.0:8000.
+  1. Binds :8000 right away with a loading-page proxy (devpush won't time out).
+  2. Installs all Python dependencies via `python -m pip` only.
+  3. Downloads the easySIPp Django/ASGI source from GitHub (pure Python urllib).
+  4. Patches settings to disable CSRF (local-use tool — safe and intended).
+  5. Runs migrations + load_initial_if_empty + collectstatic.
+  6. Starts uvicorn (ASGI) on 0.0.0.0:8080 (internal).
+  7. Proxy flips to live-forward mode once uvicorn is ready.
 
 Requirements on the host:
   - python3 (3.6+)
@@ -26,6 +33,12 @@ import os
 import zipfile
 import shutil
 import io
+import threading
+import time
+import signal
+import logging
+import urllib.request
+from http.server import HTTPServer, BaseHTTPRequestHandler
 
 # ─────────────────────────────────────────────────────────────
 # CONFIG
@@ -38,12 +51,90 @@ MANAGE_PY          = os.path.join(WORK_DIR, "manage.py")
 SETTINGS_PY        = os.path.join(WORK_DIR, "easySIPp_project", "settings.py")
 ASGI_APP           = "easySIPp_project.asgi:application"
 HOST               = "0.0.0.0"
-PORT               = 8000
+PUBLIC_PORT        = 8000   # devpush always probes/routes this — Python owns it immediately
+INTERNAL_PORT      = 8080   # uvicorn listens here
 
 BOOTSTRAP_PACKAGES = {
     "django":   "django==4.2.21",
     "requests": "requests",
 }
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+log = logging.getLogger("easysipp")
+
+# ─────────────────────────────────────────────────────────────
+# REVERSE PROXY  (lives on :8000 the entire time)
+# ─────────────────────────────────────────────────────────────
+
+class ReverseProxyHandler(BaseHTTPRequestHandler):
+    """
+    Before uvicorn is ready → returns a friendly 'starting…' page.
+    After uvicorn is ready  → forwards everything to :8080.
+    """
+    ready = False   # flipped to True once uvicorn responds
+
+    def _forward(self):
+        if not ReverseProxyHandler.ready:
+            body = (
+                b"<html><body style='font-family:sans-serif;padding:2rem'>"
+                b"<h2>easySIPp is starting, please wait\xe2\x80\xa6</h2>"
+                b"<p>The app is being set up. This page refreshes automatically.</p>"
+                b"<script>setTimeout(()=>location.reload(),3000)</script>"
+                b"</body></html>"
+            )
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
+        target = f"http://127.0.0.1:{INTERNAL_PORT}{self.path}"
+        try:
+            skip = {"connection", "keep-alive", "transfer-encoding",
+                    "te", "trailers", "upgrade",
+                    "proxy-authorization", "proxy-authenticate"}
+            fwd_headers = {k: v for k, v in self.headers.items()
+                           if k.lower() not in skip}
+
+            length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(length) if length > 0 else None
+
+            req = urllib.request.Request(
+                target, data=body, headers=fwd_headers, method=self.command
+            )
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                self.send_response(resp.status)
+                for k, v in resp.headers.items():
+                    if k.lower() not in ("connection", "transfer-encoding", "keep-alive"):
+                        self.send_header(k, v)
+                self.end_headers()
+                self.wfile.write(resp.read())
+        except Exception as exc:
+            msg = f"<html><body><h2>Proxy error: {exc}</h2></body></html>".encode()
+            self.send_response(502)
+            self.send_header("Content-Type", "text/html")
+            self.send_header("Content-Length", str(len(msg)))
+            self.end_headers()
+            self.wfile.write(msg)
+
+    do_GET     = _forward
+    do_POST    = _forward
+    do_PUT     = _forward
+    do_DELETE  = _forward
+    do_PATCH   = _forward
+    do_HEAD    = _forward
+    do_OPTIONS = _forward
+
+    def log_message(self, fmt, *args):
+        pass  # silence access logs
+
+
+def start_proxy():
+    server = HTTPServer((HOST, PUBLIC_PORT), ReverseProxyHandler)
+    t = threading.Thread(target=server.serve_forever, daemon=True)
+    t.start()
+    log.info("Reverse proxy listening on :%d  (loading page until uvicorn is ready)", PUBLIC_PORT)
 
 # ─────────────────────────────────────────────────────────────
 # STEP 1 — Bootstrap pip + install packages
@@ -72,22 +163,8 @@ def ensure_packages(packages):
     print("[bootstrap] Bootstrap complete.")
 
 
-ensure_packages(BOOTSTRAP_PACKAGES)
-
 # ─────────────────────────────────────────────────────────────
-# STEP 2 — Imports safe now
-# ─────────────────────────────────────────────────────────────
-
-import time
-import signal
-import logging
-import urllib.request
-
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-log = logging.getLogger("easysipp")
-
-# ─────────────────────────────────────────────────────────────
-# STEP 3 — Download & extract easySIPp source
+# STEP 2 — Download & extract easySIPp source
 # ─────────────────────────────────────────────────────────────
 
 def download_easysipp():
@@ -129,7 +206,7 @@ def install_requirements():
 
 
 # ─────────────────────────────────────────────────────────────
-# STEP 4 — Patch settings.py to disable CSRF
+# STEP 3 — Patch settings.py
 # ─────────────────────────────────────────────────────────────
 
 SETTINGS_PATCH_MARKER = "# >>> easysipp-server csrf-patch >>>"
@@ -140,6 +217,7 @@ SETTINGS_PATCH_LINES = [
     "# Appended by server.py — removes CSRF middleware for local/self-hosted use.\n",
     "MIDDLEWARE = [m for m in MIDDLEWARE if 'csrf' not in m.lower()]\n",
     "ALLOWED_HOSTS = ['*']\n",
+    "CSRF_TRUSTED_ORIGINS = ['https://*', 'http://*']\n",
     "DEBUG = True\n",
     "# <<< easysipp-server csrf-patch <<<\n",
 ]
@@ -160,11 +238,11 @@ def patch_settings():
     with open(SETTINGS_PY, "a") as f:
         f.writelines(SETTINGS_PATCH_LINES)
 
-    log.info("Patched settings.py: CSRF middleware removed, ALLOWED_HOSTS=*, DEBUG=True.")
+    log.info("Patched settings.py: CSRF removed, ALLOWED_HOSTS=*, DEBUG=True.")
 
 
 # ─────────────────────────────────────────────────────────────
-# STEP 5 — Django setup helpers
+# STEP 4 — Django setup helpers
 # ─────────────────────────────────────────────────────────────
 
 def django_manage(*args):
@@ -195,7 +273,7 @@ def setup_django():
 
 
 # ─────────────────────────────────────────────────────────────
-# STEP 6 — Run uvicorn (ASGI server)
+# STEP 5 — Run uvicorn on internal port :8080
 # ─────────────────────────────────────────────────────────────
 
 server_proc = None
@@ -209,31 +287,33 @@ def start_server():
     cmd = [
         sys.executable, "-m", "uvicorn",
         ASGI_APP,
-        "--host", HOST,
-        "--port", str(PORT),
+        "--host", "127.0.0.1",    # internal only — proxy handles :8000
+        "--port", str(INTERNAL_PORT),
         "--workers", "2",
     ]
     log.info("Starting uvicorn: %s", " ".join(cmd))
     server_proc = subprocess.Popen(cmd, cwd=WORK_DIR, env=env)
-    log.info("easySIPp is running — Open: http://<your-server-ip>:%d", PORT)
+    log.info("uvicorn started on :%d (internal)", INTERNAL_PORT)
 
 
-def wait_for_server(timeout=60):
-    url = "http://127.0.0.1:" + str(PORT) + "/"
-    log.info("Waiting for server to be ready at %s ...", url)
+def wait_for_uvicorn(timeout=120):
+    url = f"http://127.0.0.1:{INTERNAL_PORT}/"
+    log.info("Waiting for uvicorn to be ready at %s ...", url)
     deadline = time.time() + timeout
     while time.time() < deadline:
         try:
             urllib.request.urlopen(url, timeout=2)
-            log.info("Server is ready.")
+            log.info("uvicorn is ready — flipping proxy to live mode.")
+            ReverseProxyHandler.ready = True
             return
         except Exception:
             time.sleep(1)
-    log.warning("Server did not respond within %ds — it may still be starting.", timeout)
+    log.warning("uvicorn did not respond within %ds — enabling proxy anyway.", timeout)
+    ReverseProxyHandler.ready = True
 
 
 # ─────────────────────────────────────────────────────────────
-# STEP 7 — Graceful shutdown
+# STEP 6 — Graceful shutdown
 # ─────────────────────────────────────────────────────────────
 
 def shutdown(signum=None, frame=None):
@@ -254,20 +334,30 @@ signal.signal(signal.SIGTERM, shutdown)
 # ─────────────────────────────────────────────────────────────
 
 def main():
+    # Bind :8000 IMMEDIATELY so devpush health-check always gets a response
+    start_proxy()
+
+    # Now do all the slow setup work
+    ensure_packages(BOOTSTRAP_PACKAGES)
     download_easysipp()
     install_requirements()
     patch_settings()
     setup_django()
-    start_server()
-    wait_for_server()
 
+    # Start uvicorn on :8080, wait for it, then flip proxy to live mode
+    start_server()
+    wait_for_uvicorn()
+
+    log.info("easySIPp is live at http://<your-server>:%d", PUBLIC_PORT)
+
+    # Keep alive — restart uvicorn if it crashes
     while True:
         code = server_proc.poll()
         if code is not None:
-            log.error("Server exited with code %d — restarting ...", code)
+            log.error("uvicorn exited with code %d — restarting ...", code)
             start_server()
+            wait_for_uvicorn()
         time.sleep(3)
-
 
 if __name__ == "__main__":
     main()
